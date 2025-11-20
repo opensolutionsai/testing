@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Message Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Spinner for loading state */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #4f46e5;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+        <div class="loader w-12 h-12 mb-4 border-4 border-t-indigo-600"></div>
+        <p class="text-gray-600 font-medium animate-pulse">Connecting to Database...</p>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-4 right-4 bg-gray-800 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-[-150%] transition-transform duration-300 z-50 flex items-center gap-2">
+        <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+        <span id="toast-msg">Link copied!</span>
+    </div>
+
+    <!-- Login Section -->
+    <div id="login-section" class="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 fade-in hidden">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Welcome Back</h1>
+            <p class="text-gray-500 mt-2">Please enter your details to access your messages.</p>
+        </div>
+
+        <form id="login-form" class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                <input type="text" id="username" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition" placeholder="Enter username" required>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input type="password" id="password" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition" placeholder="Enter password" required>
+            </div>
+
+            <div id="error-msg" class="text-red-500 text-sm text-center hidden">Invalid username or password</div>
+
+            <button type="submit" id="login-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                Sign In
+            </button>
+        </form>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboard-section" class="w-full max-w-4xl hidden fade-in">
+        <!-- Header -->
+        <div class="bg-white rounded-xl shadow-md p-6 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800" id="dash-title">My Messages</h2>
+                <div class="flex items-center gap-2">
+                    <p class="text-gray-500">User: <span id="display-username" class="font-semibold text-indigo-600"></span></p>
+                    <span id="view-only-badge" class="hidden px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">READ ONLY</span>
+                </div>
+            </div>
+            
+            <!-- Action Buttons Container -->
+            <div class="flex flex-wrap gap-2 justify-end" id="action-buttons">
+                <!-- Standard Login Buttons -->
+                <div id="owner-controls" class="flex gap-2 hidden">
+                    <button onclick="shareProfile('view')" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-3 py-2 rounded-lg text-sm font-medium transition border border-indigo-200 flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        Share View
+                    </button>
+                    <button onclick="shareProfile('login')" class="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 px-3 py-2 rounded-lg text-sm font-medium transition border border-emerald-200 flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                        Share Access
+                    </button>
+                    <button id="logout-btn" class="bg-red-50 text-red-600 hover:bg-red-100 px-6 py-2 rounded-lg font-medium transition border border-red-200">
+                        Logout
+                    </button>
+                </div>
+                
+                <!-- Guest Button -->
+                <div id="guest-controls" class="hidden">
+                    <button onclick="location.href=location.pathname" class="bg-gray-100 text-gray-600 hover:bg-gray-200 px-4 py-2 rounded-lg font-medium transition">
+                        Go to Login
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Messages Grid -->
+        <div id="messages-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Messages will be injected here via JS -->
+        </div>
+
+        <!-- Empty State (Hidden by default) -->
+        <div id="empty-state" class="hidden text-center py-12">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900">No messages found</h3>
+            <p class="text-gray-500 mt-1">Your inbox is currently empty.</p>
+        </div>
+    </div>
+
+    <script>
+        const SHEET_ID = '1LbDBVj5_agp59Ivd42iDElWExUhcrB-M-loTpzxoFBc';
+        let db = [];
+        let currentUser = null;
+        let isReadOnly = false;
+
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loginSection = document.getElementById('login-section');
+        const errorDisplay = document.querySelector('#loading-overlay p');
+
+        function initApp() {
+            window.handleSheetData = function(response) {
+                if (response.status === 'error') {
+                    showError("Google Sheets Error: " + response.errors[0].detailed_message);
+                    return;
+                }
+                try {
+                    const cols = response.table.cols;
+                    const rows = response.table.rows;
+                    db = rows.map(row => {
+                        let obj = {};
+                        row.c.forEach((cell, i) => {
+                            const key = cols[i].label || cols[i].id;
+                            const val = cell ? (cell.v !== null ? String(cell.v) : '') : '';
+                            obj[key] = val;
+                        });
+                        return obj;
+                    });
+                    console.log("DB Loaded:", db.length);
+                    handleAutoLogin();
+                } catch (err) {
+                    console.error(err);
+                    showError("Data parsing error.");
+                }
+            };
+
+            const script = document.createElement('script');
+            script.src = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:handleSheetData`;
+            script.onerror = () => showError("Connection failed.");
+            document.body.appendChild(script);
+        }
+
+        function showError(msg) {
+            errorDisplay.innerHTML = `${msg}<br><span class="text-sm">Ensure Sheet is Public</span>`;
+            errorDisplay.classList.add('text-red-500', 'text-center');
+        }
+
+        function handleAutoLogin() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const userParam = urlParams.get('u');
+            const passParam = urlParams.get('p');
+            const modeParam = urlParams.get('mode'); // 'view' or null
+            const msgParam = urlParams.get('msg'); // specific message key
+
+            // TYPE 3: LOGIN LINK (User + Pass)
+            if (userParam && passParam) {
+                const foundUser = db.find(u => u.Username === userParam && u.Password === passParam);
+                if (foundUser) {
+                    loginSuccess(foundUser, false); // false = not read only
+                    return;
+                }
+            }
+
+            // TYPE 1 & 2: VIEW ONLY (User + Mode=View)
+            if (userParam && modeParam === 'view') {
+                // We find user by Username ONLY (Password not required for view mode)
+                const foundUser = db.find(u => u.Username === userParam);
+                if (foundUser) {
+                    // If msgParam exists, we will filter later in showDashboard
+                    loginSuccess(foundUser, true); // true = read only
+                    return;
+                }
+            }
+
+            checkLocalStorage();
+        }
+
+        function checkLocalStorage() {
+            const storedUser = localStorage.getItem('msgAppUser');
+            if (storedUser) {
+                const parsedUser = JSON.parse(storedUser);
+                const updatedUser = db.find(u => u.Username === parsedUser.Username && u.Password === parsedUser.Password);
+                if (updatedUser) loginSuccess(updatedUser, false);
+                else {
+                    localStorage.removeItem('msgAppUser');
+                    showLogin();
+                }
+            } else {
+                showLogin();
+            }
+        }
+
+        function showLogin() {
+            loginSection.classList.remove('hidden');
+            loadingOverlay.classList.add('hidden');
+        }
+
+        function loginSuccess(user, readOnly) {
+            currentUser = user;
+            isReadOnly = readOnly;
+
+            if (!readOnly) {
+                // Only save to local storage if FULL login (Type 3)
+                localStorage.setItem('msgAppUser', JSON.stringify(user));
+            }
+
+            loginSection.classList.add('hidden');
+            loadingOverlay.classList.add('hidden');
+            showDashboard(user);
+        }
+
+        // Login Form Submit
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const u = document.getElementById('username').value.trim();
+            const p = document.getElementById('password').value.trim();
+            const found = db.find(user => user.Username === u && user.Password === p);
+            if (found) loginSuccess(found, false);
+            else {
+                const err = document.getElementById('error-msg');
+                err.classList.remove('hidden');
+                loginSection.classList.add('animate-pulse');
+                setTimeout(() => loginSection.classList.remove('animate-pulse'), 500);
+            }
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            localStorage.removeItem('msgAppUser');
+            window.location.href = window.location.pathname; // Clear params
+        });
+
+        function showDashboard(userData) {
+            const dashboard = document.getElementById('dashboard-section');
+            const displayUser = document.getElementById('display-username');
+            const ownerControls = document.getElementById('owner-controls');
+            const guestControls = document.getElementById('guest-controls');
+            const badge = document.getElementById('view-only-badge');
+            const container = document.getElementById('messages-container');
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetMsg = urlParams.get('msg');
+
+            dashboard.classList.remove('hidden');
+            displayUser.textContent = userData.Username;
+
+            // Setup View Mode UI
+            if (isReadOnly) {
+                ownerControls.classList.add('hidden');
+                guestControls.classList.remove('hidden');
+                badge.classList.remove('hidden');
+                // Hide share buttons on cards if read-only? 
+                // Actually, let's allow re-sharing even in read-only for utility, 
+                // but they can only share what they see (View links).
+            } else {
+                ownerControls.classList.remove('hidden');
+                guestControls.classList.add('hidden');
+                badge.classList.add('hidden');
+            }
+
+            container.innerHTML = '';
+            let msgCount = 0;
+
+            // Filter messages based on Type 1 (Single) vs Type 2 (All)
+            Object.keys(userData).forEach(key => {
+                // Basic check: is it a message column?
+                if (key.toLowerCase().startsWith('message') && userData[key] && userData[key].trim() !== '') {
+                    
+                    // If Type 1 (Single Msg Link), ONLY show that key
+                    if (targetMsg && key !== targetMsg) {
+                        return; 
+                    }
+
+                    msgCount++;
+                    createMessageCard(key, userData[key]);
+                }
+            });
+
+            if (msgCount === 0) document.getElementById('empty-state').classList.remove('hidden');
+            else document.getElementById('empty-state').classList.add('hidden');
+        }
+
+        function createMessageCard(title, content) {
+            const displayTitle = title.replace(/(\w)(\w*)/g, (g0,g1,g2) => g1.toUpperCase() + g2.toLowerCase());
+            const card = document.createElement('div');
+            card.className = "bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition duration-200 flex flex-col";
+            
+            // Only show Share Button if NOT read-only (Owner mode) 
+            // OR if you want viewers to be able to share what they see.
+            // Let's assume Owner only for sharing to keep it clean, 
+            // or allow viewers to share the View link.
+            
+            const shareBtn = `
+                <button onclick="shareSingleMsg('${title}')" title="Share this message only" class="text-gray-400 hover:text-indigo-600 transition p-1 rounded-full hover:bg-indigo-50">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+                </button>
+            `;
+
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-indigo-50 rounded-lg">
+                            <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                        </div>
+                        <h3 class="font-bold text-gray-800 text-lg">${displayTitle}</h3>
+                    </div>
+                    ${!isReadOnly ? shareBtn : ''}
+                </div>
+                <div class="text-gray-600 text-sm leading-relaxed whitespace-pre-wrap flex-grow overflow-auto max-h-60">
+                    ${content}
+                </div>
+                <div class="mt-4 pt-4 border-t border-gray-100 flex justify-end">
+                    <button class="text-xs text-indigo-600 font-medium hover:text-indigo-800 flex items-center gap-1" onclick="copyToClipboard(this, \`${content.replace(/`/g, "\\`").replace(/"/g, "&quot;")}\`)">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                        Copy
+                    </button>
+                </div>
+            `;
+            document.getElementById('messages-container').appendChild(card);
+        }
+
+        // --- SHARE LOGIC ---
+
+        // 1. SHARE SINGLE MESSAGE (Type 1)
+        window.shareSingleMsg = function(msgKey) {
+            // Generates: ?u=user&mode=view&msg=message1
+            const params = new URLSearchParams();
+            params.set('u', currentUser.Username);
+            params.set('mode', 'view');
+            params.set('msg', msgKey);
+            copyLink(params, "Single message link copied!");
+        }
+
+        // 2. SHARE PROFILE / LOGIN (Type 2 & 3)
+        window.shareProfile = function(type) {
+            const params = new URLSearchParams();
+            params.set('u', currentUser.Username);
+            
+            if (type === 'view') {
+                // Type 2: ?u=user&mode=view
+                params.set('mode', 'view');
+                copyLink(params, "View-only profile link copied!");
+            } else {
+                // Type 3: ?u=user&p=pass
+                params.set('p', currentUser.Password);
+                copyLink(params, "Full access login link copied!");
+            }
+        }
+
+        function copyLink(params, successMsg) {
+            const baseUrl = window.location.origin + window.location.pathname;
+            const fullUrl = `${baseUrl}?${params.toString()}`;
+            
+            const textArea = document.createElement("textarea");
+            textArea.value = fullUrl;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("Copy");
+            textArea.remove();
+
+            showToast(successMsg);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            toast.classList.remove('translate-y-[-150%]');
+            setTimeout(() => toast.classList.add('translate-y-[-150%]'), 3000);
+        }
+
+        window.copyToClipboard = function(btn, text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("Copy");
+            textArea.remove();
+            const original = btn.innerHTML;
+            btn.textContent = "Copied!";
+            btn.classList.add('text-green-600');
+            setTimeout(() => {
+                btn.innerHTML = original;
+                btn.classList.remove('text-green-600');
+            }, 2000);
+        }
+
+        initApp();
+    </script>
+</body>
+</html>

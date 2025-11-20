@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Vault: Hybrid Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .loader { border: 3px solid #1e293b; border-radius: 50%; border-top: 3px solid #38bdf8; width: 24px; height: 24px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        input, textarea { background-color: #1e293b !important; color: white !important; border-color: #334155 !important; }
+        input:focus, textarea:focus { border-color: #38bdf8 !important; ring: 2px; }
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.85); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 relative">
+
+
+    <!-- Background Effects -->
+    <div class="absolute inset-0 overflow-hidden -z-10">
+        <div class="absolute top-[-10%] right-[-10%] w-96 h-96 bg-purple-600/20 rounded-full blur-3xl"></div>
+        <div class="absolute bottom-[-10%] left-[-10%] w-96 h-96 bg-blue-600/20 rounded-full blur-3xl"></div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900/95 z-50 flex flex-col items-center justify-center transition-opacity duration-300">
+        <div class="loader w-12 h-12 mb-4 border-4 border-t-sky-500"></div>
+        <p class="text-slate-400 font-medium animate-pulse" id="loading-text">Initializing Hybrid Engine...</p>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed top-4 right-4 glass px-6 py-4 rounded-lg shadow-2xl transform translate-y-[-200%] transition-transform duration-300 z-[60] flex items-center gap-3 border-l-4 border-sky-500">
+        <div id="toast-icon"></div>
+        <span id="toast-msg" class="font-medium text-white">Notification</span>
+    </div>
+
+    <!-- Share Modal -->
+    <div id="share-modal" class="fixed inset-0 modal-backdrop z-50 hidden flex items-center justify-center p-4 fade-in">
+        <div class="glass w-full max-w-xl rounded-2xl p-6 shadow-2xl relative bg-slate-900">
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            
+            <h3 class="text-xl font-bold text-white mb-1" id="modal-title">Share Content</h3>
+            <p class="text-slate-400 text-sm mb-6" id="modal-desc">Generate secure links for others.</p>
+
+            <!-- Link Type A: With Password -->
+            <div class="mb-6">
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-xs font-bold text-emerald-400 uppercase tracking-wide">🔓 Instant Access (Password Embedded)</label>
+                    <span class="text-[10px] bg-emerald-900/50 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">One-click view</span>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="link-with-pass" readonly class="w-full p-3 rounded-lg text-sm font-mono text-slate-300 border">
+                    <button onclick="copyInput('link-with-pass')" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 rounded-lg font-bold transition whitespace-nowrap">Copy</button>
+                </div>
+            </div>
+
+            <!-- Link Type B: Without Password -->
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-xs font-bold text-sky-400 uppercase tracking-wide">🔒 Secure Access (Password Required)</label>
+                    <span class="text-[10px] bg-sky-900/50 text-sky-300 px-2 py-0.5 rounded border border-sky-500/30">Receiver types password</span>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="link-no-pass" readonly class="w-full p-3 rounded-lg text-sm font-mono text-slate-300 border">
+                    <button onclick="copyInput('link-no-pass')" class="bg-sky-600 hover:bg-sky-500 text-white px-4 rounded-lg font-bold transition whitespace-nowrap">Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Section -->
+    <div id="auth-section" class="w-full max-w-md glass rounded-2xl shadow-2xl p-8 fade-in hidden">
+        
+        <!-- Login Box -->
+        <div id="login-box">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-white tracking-tight">🔐 Vault Login</h1>
+                <p class="text-slate-400 mt-2 text-sm" id="login-sub">Enter credentials to decrypt data</p>
+            </div>
+            <form id="login-form" class="space-y-5">
+                <div>
+                    <label class="text-xs text-slate-500 uppercase font-bold">Username</label>
+                    <input type="text" id="login-user" class="w-full px-4 py-3 rounded-lg border outline-none mt-1" placeholder="Enter username" required>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-500 uppercase font-bold">Secret Key (Password)</label>
+                    <input type="password" id="login-pass" class="w-full px-4 py-3 rounded-lg border outline-none mt-1" placeholder="Enter secret key" required>
+                </div>
+                <div id="login-error" class="text-red-400 text-sm text-center hidden bg-red-500/10 p-2 rounded border border-red-500/20"></div>
+                <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 rounded-lg transition shadow-lg shadow-sky-500/20">Decrypt & Open</button>
+            </form>
+            <div class="mt-6 text-center">
+                <p class="text-sm text-slate-400">New here? <button type="button" onclick="toggleAuth('register')" class="text-sky-400 font-semibold hover:text-sky-300">Create Vault</button></p>
+            </div>
+        </div>
+
+        <!-- Register Box -->
+        <div id="register-box" class="hidden">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-white tracking-tight">✨ Create Vault</h1>
+                <p class="text-slate-400 mt-2 text-sm">Data is encrypted before leaving your device</p>
+            </div>
+            <form id="register-form" class="space-y-5">
+                <input type="text" id="reg-user" class="w-full px-4 py-3 rounded-lg border outline-none" placeholder="Choose Username" required>
+                <input type="password" id="reg-pass" class="w-full px-4 py-3 rounded-lg border outline-none" placeholder="Set Secret Key" required>
+                <button type="submit" id="reg-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-lg transition shadow-lg shadow-emerald-500/20">Encrypt & Register</button>
+            </form>
+            <div class="mt-6 text-center">
+                <button type="button" onclick="toggleAuth('login')" class="text-sky-400 text-sm hover:text-sky-300">Back to Login</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboard-section" class="w-full max-w-6xl hidden fade-in pb-20">
+        
+        <!-- Header Bar -->
+        <div class="glass rounded-xl p-4 mb-8 flex flex-col md:flex-row justify-between items-center gap-4 sticky top-4 z-40 shadow-2xl bg-slate-900/90">
+            <div>
+                <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                    <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span id="display-username" class="text-sky-400 font-mono"></span>
+                    <span id="view-badge" class="hidden text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded border border-amber-500/30 font-bold">VIEW ONLY MODE</span>
+                </h2>
+            </div>
+            
+            <!-- Owner Controls -->
+            <div class="flex flex-wrap gap-2" id="owner-controls">
+                <button onclick="openShareModal('all')" class="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-lg">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
+                    Share All Messages
+                </button>
+                <button onclick="shareLoginLink()" class="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-lg">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+                    Share Login Access
+                </button>
+                <button onclick="doLogout()" class="bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition border border-red-500/20">🔒 Lock Vault</button>
+            </div>
+
+            <!-- Guest Controls -->
+            <div class="hidden" id="guest-controls">
+                <button onclick="doLogout()" class="bg-slate-700 text-slate-300 px-6 py-2 rounded-lg text-sm font-bold hover:bg-slate-600 transition">Exit Viewer</button>
+            </div>
+        </div>
+
+        <!-- Messages Grid -->
+        <div id="messages-container" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        
+        <!-- Empty State -->
+        <div id="empty-state" class="hidden text-center py-12 text-slate-500">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+            <p>No messages found in this view.</p>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CONFIGURATION & GLOBAL STATE
+        // ==========================================
+        const SHEET_ID = '1LbDBVj5_agp59Ivd42iDElWExUhcrB-M-loTpzxoFBc'; // Free Read (Google)
+        const API_URL = 'https://sheetdb.io/api/v1/nqijl2qagvpxg';       // Paid Write (SheetDB)
+        
+        // EXACT SCHEMA MAPPING (Crucial for Hybrid Engine)
+        // This matches the columns in your Google Sheet exactly.
+        const COL_USER = 'Username';
+        const COL_PASS = 'Password';
+        const MSG_COLS = Array.from({length: 14}, (_, i) => `message ${i + 1}`);
+        
+        const SCHEMA = [COL_USER, COL_PASS, ...MSG_COLS];
+
+        // State
+        let db = [];          // Cache from Google Sheets
+        let currentUser = null;
+        let currentKey = null; // Raw Password for Decryption
+        let isReadOnly = false;
+
+        // ==========================================
+        // 2. CRYPTOGRAPHY ENGINE
+        // ==========================================
+        const hashPassword = (pass) => CryptoJS.SHA256(pass).toString();
+        
+        const encryptData = (text, pass) => {
+            if (!text) return "";
+            return CryptoJS.AES.encrypt(text, pass).toString();
+        };
+
+        const decryptData = (cipher, pass) => {
+            if (!cipher) return "";
+            try {
+                const bytes = CryptoJS.AES.decrypt(cipher, pass);
+                const original = bytes.toString(CryptoJS.enc.Utf8);
+                return original || "";
+            } catch (e) {
+                return "[🔒 LOCKED CONTENT]";
+            }
+        };
+
+        // ==========================================
+        // 3. HYBRID DATA ENGINE (FIXED)
+        // ==========================================
+        function initApp() {
+            // NOTE: We fetch JSON using Google Visualization API (gviz) which is FREE.
+            const gvizUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+            
+            fetch(gvizUrl)
+                .then(res => res.text())
+                .then(text => {
+                    // Parse Google's JSONP format
+                    const json = JSON.parse(text.substring(47).slice(0, -2));
+                    
+                    // MAP DATA TO SCHEMA
+                    // We ignore Google's internal IDs ("A", "B") and map by Index based on your known columns
+                    db = json.table.rows.map(row => {
+                        let obj = {};
+                        row.c.forEach((cell, i) => {
+                            if (i < SCHEMA.length) {
+                                const key = SCHEMA[i];
+                                obj[key] = cell ? (cell.v !== null ? String(cell.v) : "") : "";
+                            }
+                        });
+                        return obj;
+                    });
+
+                    console.log("✅ Hybrid Engine: Cache Loaded", db.length, "users");
+                    // If data loaded correctly, db[0] should have property 'Username'
+                    if (db.length > 0 && !db[0].hasOwnProperty(COL_USER)) {
+                        console.warn("⚠️ Warning: Schema mapping might be misaligned. Check column order.");
+                    }
+
+                    router();
+                })
+                .catch(err => {
+                    console.error("❌ Connection Failed:", err);
+                    document.getElementById('loading-text').innerText = "Connection Failed. Please reload.";
+                });
+        }
+
+        // ==========================================
+        // 4. ROUTER & AUTHENTICATION
+        // ==========================================
+        function router() {
+            const params = new URLSearchParams(window.location.search);
+            const u = params.get('u');
+            const k = params.get('k');
+            const mode = params.get('mode');
+            const login = params.get('login');
+            const msg = params.get('msg');
+
+            // SCENARIO 1: Login Share Link (Full Access)
+            if (u && k && login === 'true') {
+                console.log("🔑 Login Share Link Detected");
+                attemptLogin(u, k, false, true);
+                return;
+            }
+
+            // SCENARIO 2: View Share Link (Read Only)
+            if (u && mode === 'view') {
+                console.log("👁️ View Share Link Detected");
+                if (k) {
+                    // Password included
+                    attemptLogin(u, k, true, false);
+                } else {
+                    // Password required
+                    document.getElementById('login-user').value = u;
+                    document.getElementById('login-user').readOnly = true;
+                    document.getElementById('login-user').classList.add('opacity-50', 'cursor-not-allowed');
+                    
+                    const infoText = msg ? "Password required to view shared message" : "Password required to view shared content";
+                    document.getElementById('login-sub').innerText = infoText;
+                    
+                    showAuth();
+                }
+                return;
+            }
+
+            // SCENARIO 3: Local Storage Session
+            const stored = localStorage.getItem('vaultSession');
+            if (stored) {
+                console.log("💾 Session Found");
+                const session = JSON.parse(stored);
+                attemptLogin(session.u, session.k, false, true);
+            } else {
+                showAuth();
+            }
+        }
+
+        // Hybrid Login Logic
+        async function attemptLogin(u, p, readOnlyMode, saveSession) {
+            const hashedP = hashPassword(p);
+            
+            // 1. Check Google Cache (Fast & Free)
+            let found = db.find(user => user[COL_USER] === u);
+
+            // 2. FALLBACK: Check SheetDB ONLY if not in cache
+            // This only happens for BRAND NEW users who registered seconds ago
+            // before Google updated the cache.
+            if (!found) {
+                console.log("⚠️ User not in cache, checking SheetDB API...");
+                document.getElementById('loading-text').innerText = "Verifying fresh data...";
+                try {
+                    const res = await fetch(`${API_URL}/search?${COL_USER}=${encodeURIComponent(u)}`);
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        found = data[0];
+                        console.log("✅ User found in SheetDB (Fresh)");
+                    }
+                } catch (e) {
+                    console.log("❌ SheetDB fallback failed:", e);
+                }
+            } else {
+                console.log("✅ User found in Local Cache (No API Call)");
+            }
+
+            // 3. Verify Credentials
+            if (found && found[COL_PASS] === hashedP) {
+                loginSuccess(found, p, readOnlyMode, saveSession);
+            } else {
+                if (readOnlyMode || saveSession) {
+                    if(saveSession) localStorage.removeItem('vaultSession');
+                    showToast("Invalid Credentials or Link Expired", "error");
+                    showAuth();
+                } else {
+                    const err = document.getElementById('login-error');
+                    err.innerText = "❌ Invalid Password or Username";
+                    err.classList.remove('hidden');
+                    document.getElementById('loading-overlay').classList.add('hidden');
+                }
+            }
+        }
+
+        function loginSuccess(user, rawKey, readOnlyMode, saveSession) {
+            currentUser = user;
+            currentKey = rawKey;
+            isReadOnly = readOnlyMode;
+
+            if (saveSession) {
+                localStorage.setItem('vaultSession', JSON.stringify({ u: user[COL_USER], k: rawKey }));
+            }
+
+            // Clean URL
+            if (window.location.search) {
+                const params = new URLSearchParams(window.location.search);
+                const msgFilter = params.get('msg'); // Preserve msg filter
+                if (msgFilter) {
+                    window.history.replaceState({}, document.title, `${window.location.pathname}?msg=${msgFilter}`);
+                } else {
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }
+            }
+
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('loading-overlay').classList.add('hidden');
+            renderDashboard();
+        }
+
+        // ==========================================
+        // 5. DASHBOARD & UI RENDERER
+        // ==========================================
+        function renderDashboard() {
+            document.getElementById('dashboard-section').classList.remove('hidden');
+            document.getElementById('display-username').textContent = currentUser[COL_USER];
+            
+            const container = document.getElementById('messages-container');
+            container.innerHTML = '';
+
+            // UI Mode
+            if (isReadOnly) {
+                document.getElementById('owner-controls').classList.add('hidden');
+                document.getElementById('guest-controls').classList.remove('hidden');
+                document.getElementById('view-badge').classList.remove('hidden');
+            } else {
+                document.getElementById('owner-controls').classList.remove('hidden');
+                document.getElementById('guest-controls').classList.add('hidden');
+                document.getElementById('view-badge').classList.add('hidden');
+            }
+
+            const params = new URLSearchParams(window.location.search);
+            const msgFilter = params.get('msg');
+
+            let visibleCount = 0;
+
+            MSG_COLS.forEach((colKey, index) => {
+                if (msgFilter && colKey !== msgFilter) return;
+
+                const rawContent = currentUser[colKey];
+                const decrypted = decryptData(rawContent, currentKey);
+                
+                createCard(colKey, decrypted, index + 1);
+                visibleCount++;
+            });
+
+            if (visibleCount === 0) {
+                document.getElementById('empty-state').classList.remove('hidden');
+            } else {
+                document.getElementById('empty-state').classList.add('hidden');
+            }
+        }
+
+        function createCard(colKey, content, index) {
+            const inputId = `input-${index}`;
+            const card = document.createElement('div');
+            card.className = "glass p-6 rounded-xl flex flex-col hover:border-slate-500 transition duration-300 bg-slate-800/40";
+            
+            // Share Button (Owner Only)
+            const shareBtn = isReadOnly ? '' : `
+                <button onclick="openShareModal('single', '${colKey}')" class="text-slate-500 hover:text-sky-400 transition p-1 group" title="Share This Message">
+                    <svg class="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+                </button>
+            `;
+
+            // Save Button (Owner Only)
+            const saveBtn = isReadOnly ? '' : `
+                <button id="btn-${index}" onclick="saveEncrypted('${colKey}', '${inputId}')" class="bg-sky-600/20 text-sky-400 hover:bg-sky-600 hover:text-white px-4 py-2 rounded-lg text-xs font-bold uppercase transition border border-sky-500/30 tracking-wider shadow-lg hover:shadow-sky-500/50">
+                    💾 Save
+                </button>
+            `;
+
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-3">
+                    <div class="flex items-center gap-2">
+                        <h3 class="font-bold text-slate-300 text-xs uppercase tracking-widest">Slot ${index}</h3>
+                        ${content && content !== '[🔒 LOCKED CONTENT]' ? '<div class="w-1.5 h-1.5 bg-emerald-500 rounded-full shadow-emerald-500 shadow-[0_0_5px]"></div>' : ''}
+                    </div>
+                    ${shareBtn}
+                </div>
+                <textarea id="${inputId}" ${isReadOnly ? 'readonly' : ''} class="w-full p-3 rounded-lg text-sm h-32 mb-4 resize-none font-mono leading-relaxed placeholder-slate-600 bg-slate-900/50 border-slate-700 focus:border-sky-500 transition ${isReadOnly ? 'cursor-not-allowed opacity-80' : ''}" placeholder="Empty slot...">${content}</textarea>
+                <div class="flex justify-end">${saveBtn}</div>
+            `;
+            
+            document.getElementById('messages-container').appendChild(card);
+        }
+
+        // ==========================================
+        // 6. WRITING & SAVING (Owner Only - Uses SheetDB)
+        // ==========================================
+        document.getElementById('register-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const u = document.getElementById('reg-user').value.trim();
+            const p = document.getElementById('reg-pass').value.trim();
+            const btn = document.getElementById('reg-btn');
+
+            // Check Duplicate
+            if (db.find(user => user[COL_USER] === u)) {
+                showToast("Username already taken", "error");
+                return;
+            }
+
+            btn.innerText = "🔐 Encrypting & Creating...";
+            btn.disabled = true;
+
+            // Prepare Payload
+            let payload = {};
+            payload[COL_USER] = u;
+            payload[COL_PASS] = hashPassword(p);
+            MSG_COLS.forEach((col, i) => {
+                payload[col] = (i === 0) ? encryptData("Welcome to your secure vault! 🎉", p) : "";
+            });
+
+            // Write to SheetDB
+            fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: payload })
+            })
+            .then(res => res.json())
+            .then(data => {
+                showToast("✅ Account Created Successfully!", "success");
+                // Add to local db immediately so we don't need to reload or hit API again
+                db.push(payload);
+                // Instant Login
+                loginSuccess(payload, p, false, true);
+            })
+            .catch(err => {
+                console.error("Registration Error:", err);
+                showToast("❌ Registration Failed", "error");
+                btn.innerText = "Encrypt & Register";
+                btn.disabled = false;
+            });
+        });
+
+        function saveEncrypted(colKey, inputId) {
+            const plainText = document.getElementById(inputId).value;
+            const btn = document.getElementById(`btn-${inputId.split('-')[1]}`);
+            
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "⏳ Saving...";
+            btn.disabled = true;
+
+            const cipherText = encryptData(plainText, currentKey);
+            
+            // Update SheetDB
+            fetch(`${API_URL}/${COL_USER}/${currentUser[COL_USER]}`, {
+                method: 'PATCH',
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: { [colKey]: cipherText } })
+            })
+            .then(() => {
+                showToast("✅ Saved Securely", "success");
+                currentUser[colKey] = cipherText;
+            })
+            .catch(() => showToast("❌ Save Failed", "error"))
+            .finally(() => {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            });
+        }
+
+        // Login Form
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value.trim();
+            document.getElementById('login-error').classList.add('hidden');
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            
+            // Check if this is a view-only link
+            const params = new URLSearchParams(window.location.search);
+            const isViewLink = params.get('mode') === 'view';
+            
+            attemptLogin(u, p, isViewLink, !isViewLink);
+        });
+
+        // ==========================================
+        // 7. SHARING FEATURES (3 Types)
+        // ==========================================
+        
+        // TYPE 1 & 2: Single Message Share OR All Messages Share
+        function openShareModal(type, msgCol = '') {
+            const modal = document.getElementById('share-modal');
+            const title = document.getElementById('modal-title');
+            const desc = document.getElementById('modal-desc');
+            const inp1 = document.getElementById('link-with-pass');
+            const inp2 = document.getElementById('link-no-pass');
+            
+            const baseUrl = window.location.origin + window.location.pathname;
+            let p1 = new URLSearchParams();
+            let p2 = new URLSearchParams();
+
+            p1.set('u', currentUser[COL_USER]);
+            p2.set('u', currentUser[COL_USER]);
+            p1.set('mode', 'view');
+            p2.set('mode', 'view');
+            p1.set('k', currentKey); // Type A: Password included
+
+            if (type === 'single') {
+                title.innerText = "📤 Share Single Message";
+                desc.innerText = "Share only this specific message slot (read-only).";
+                p1.set('msg', msgCol);
+                p2.set('msg', msgCol);
+            } else {
+                title.innerText = "📤 Share All Messages";
+                desc.innerText = "Share all 14 message slots (read-only access).";
+            }
+
+            inp1.value = `${baseUrl}?${p1.toString()}`;
+            inp2.value = `${baseUrl}?${p2.toString()}`;
+            
+            modal.classList.remove('hidden');
+        }
+
+        // TYPE 3: Login Share (Full Access)
+        function shareLoginLink() {
+            const baseUrl = window.location.origin + window.location.pathname;
+            const params = new URLSearchParams();
+            params.set('u', currentUser[COL_USER]);
+            params.set('k', currentKey);
+            params.set('login', 'true');
+            
+            const url = `${baseUrl}?${params.toString()}`;
+            
+            navigator.clipboard.writeText(url).then(() => {
+                showToast("🔑 Login Link Copied! (Full Access)", "success");
+            }).catch(() => {
+                // Fallback for older browsers
+                const temp = document.createElement('input');
+                temp.value = url;
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand('copy');
+                document.body.removeChild(temp);
+                showToast("🔑 Login Link Copied!", "success");
+            });
+        }
+
+        // ==========================================
+        // 8. UTILITIES
+        // ==========================================
+        function showAuth() {
+            document.getElementById('auth-section').classList.remove('hidden');
+            document.getElementById('loading-overlay').classList.add('hidden');
+            document.getElementById('dashboard-section').classList.add('hidden');
+        }
+
+        function toggleAuth(mode) {
+            document.getElementById('login-box').classList.toggle('hidden', mode === 'register');
+            document.getElementById('register-box').classList.toggle('hidden', mode !== 'register');
+            // Clear error message when switching
+            document.getElementById('login-error').classList.add('hidden');
+        }
+
+        function doLogout() {
+            localStorage.removeItem('vaultSession');
+            window.location.href = window.location.pathname;
+        }
+
+        function closeModal() {
+            document.getElementById('share-modal').classList.add('hidden');
+        }
+
+        function copyInput(id) {
+            const el = document.getElementById(id);
+            el.select();
+            el.setSelectionRange(0, 99999); // For mobile
+            
+            navigator.clipboard.writeText(el.value).then(() => {
+                showToast("✅ Copied to Clipboard", "success");
+            }).catch(() => {
+                // Fallback
+                document.execCommand('copy');
+                showToast("✅ Copied to Clipboard", "success");
+            });
+        }
+
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            const icon = document.getElementById('toast-icon');
+            
+            if (type === 'error') {
+                t.classList.remove('border-sky-500');
+                t.classList.add('border-red-500');
+                icon.innerHTML = `<svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+            } else {
+                t.classList.remove('border-red-500');
+                t.classList.add('border-sky-500');
+                icon.innerHTML = `<svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+            }
+
+            t.classList.remove('translate-y-[-200%]');
+            setTimeout(() => t.classList.add('translate-y-[-200%]'), 3000);
+        }
+
+        // START APPLICATION
+        initApp();
+    </script>
+</body>
+</html>
