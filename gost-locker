@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureVault | Zero-Knowledge Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap');
+
+        /* THEME VARIABLES */
+        :root {
+            --bg-main: #0a0a0a;
+            --bg-glass: rgba(20, 20, 20, 0.8);
+            --bg-input: rgba(0, 0, 0, 0.5);
+            --border-color: #333;
+            --border-focus: #00ff41;
+            --text-main: #00ff41;
+            --text-muted: #6b7280;
+            --accent: #00ff41;
+            --accent-hover: #00cc33;
+            --font-main: 'JetBrains Mono', monospace;
+            --card-bg: rgba(20, 20, 20, 0.8);
+            --shadow-glow: 0 0 10px rgba(0, 255, 65, 0.2);
+        }
+
+        [data-theme="simple"] {
+            --bg-main: #f3f4f6;
+            --bg-glass: #ffffff;
+            --bg-input: #f9fafb;
+            --border-color: #e5e7eb;
+            --border-focus: #0ea5e9;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --accent: #0ea5e9;
+            --accent-hover: #0284c7;
+            --font-main: 'Inter', sans-serif;
+            --card-bg: #ffffff;
+            --shadow-glow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        body { font-family: var(--font-main); background-color: var(--bg-main); color: var(--text-main); transition: background 0.3s, color 0.3s; }
+        .glass { background: var(--bg-glass); backdrop-filter: blur(8px); border: 1px solid var(--border-color); transition: background 0.3s, border-color 0.3s; }
+        
+        /* Theme specific overrides */
+        [data-theme="simple"] .glass { box-shadow: var(--shadow-glow); border: 1px solid #e5e7eb; }
+        [data-theme="simple"] .matrix-bg { display: none; }
+        
+        /* Common Utilities */
+        .input-field { background-color: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); }
+        .input-field:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--accent); }
+        
+        .btn-primary { background-color: var(--accent); color: var(--bg-main); font-weight: bold; }
+        .btn-primary:hover { background-color: var(--accent-hover); }
+        [data-theme="simple"] .btn-primary { color: white; } /* White text on blue for simple */
+
+        /* Loading Animation */
+        .scan-line {
+            width: 100%;
+            height: 2px;
+            background: var(--accent);
+            position: absolute;
+            top: 0;
+            left: 0;
+            animation: scan 2s linear infinite;
+            opacity: 0.5;
+        }
+        @keyframes scan { 0% { top: 0%; } 50% { opacity: 1; } 100% { top: 100%; } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col relative overflow-hidden transition-colors duration-300">
+
+    <!-- Config -->
+    <script>
+        // ================= CONFIGURATION =================
+        const SHEET_ID = '1yYeThTQl84kc1uqFPSYQdQMjkyiMbxK6dbHLpDSH-JA'; 
+        const API_URL = 'https://sheetdb.io/api/v1/2zkunfpkbuon4'; 
+        const AUTO_LOCK_MINUTES = 5;
+        // =================================================
+    </script>
+
+    <!-- Matrix Background (Ghost Theme Only) -->
+    <div class="absolute inset-0 z-0 opacity-10 pointer-events-none matrix-bg" id="matrix-bg"></div>
+
+    <!-- Hidden File Input for Import -->
+    <input type="file" id="import-file" class="hidden" accept=".json" onchange="handleImport(this)">
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed top-5 right-5 z-50 transform translate-x-full transition-transform duration-300">
+        <div class="glass border-l-4 px-6 py-4 rounded flex items-center gap-3 shadow-2xl" style="border-color: var(--accent);">
+            <i data-lucide="shield-check" style="color: var(--accent);"></i>
+            <span id="toast-msg">Operation Successful</span>
+        </div>
+    </div>
+
+    <!-- GENERATOR MODAL -->
+    <div id="generator-modal" class="fixed inset-0 z-[60] bg-black/80 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-sm glass p-6 rounded-xl shadow-2xl text-center">
+            <h3 class="text-lg font-bold mb-4">Generate Password</h3>
+            
+            <!-- Display Area -->
+            <div class="p-4 rounded-lg border mb-4 relative group bg-black/20" style="border-color: var(--border-color);">
+                <div id="gen-display" class="font-mono text-xl break-all tracking-wider font-bold" style="color: var(--accent);"></div>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex gap-4 justify-center mb-6">
+                <button onclick="runGenerator()" class="p-2 rounded hover:bg-gray-500/10 transition" title="Regenerate">
+                    <i data-lucide="refresh-cw" class="w-6 h-6"></i>
+                </button>
+                <button onclick="copyGenPass()" class="p-2 rounded hover:bg-gray-500/10 transition" title="Copy to Clipboard">
+                    <i data-lucide="copy" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-3">
+                <button onclick="closeModal('generator-modal')" class="flex-1 py-2 rounded border hover:bg-gray-500/10" style="border-color: var(--border-color);">Close</button>
+                <button id="use-gen-btn" onclick="useGeneratedPass()" class="flex-1 btn-primary py-2 rounded hidden shadow-lg">Use Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHARE MODAL (Receiver View) -->
+    <div id="share-receiver" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background: var(--bg-main);">
+        <div class="w-full max-w-md glass p-8 rounded-xl text-center">
+            <div class="mb-4 flex justify-center">
+                <div class="p-3 rounded-full bg-opacity-20" style="background-color: rgba(14, 165, 233, 0.1);">
+                    <i data-lucide="share-2" class="w-8 h-8" style="color: var(--accent);"></i>
+                </div>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">Shared Password</h2>
+            <p class="text-sm mb-6 opacity-75">Someone shared a secure credential with you.</p>
+            
+            <div class="text-left space-y-4">
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Service</label>
+                    <input type="text" id="share-site" readonly class="w-full input-field p-3 rounded">
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Username</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="share-user" readonly class="w-full input-field p-3 rounded">
+                        <button onclick="copyInput('share-user')" class="p-2 rounded hover:bg-gray-700/20 transition"><i data-lucide="copy" class="w-5 h-5"></i></button>
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Password</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="share-pass" readonly class="w-full input-field p-3 rounded font-mono">
+                        <button onclick="copyInput('share-pass')" class="p-2 rounded hover:bg-gray-700/20 transition"><i data-lucide="copy" class="w-5 h-5"></i></button>
+                    </div>
+                </div>
+                <div id="share-notes-container" class="hidden">
+                    <label class="text-xs font-bold uppercase opacity-50">Notes</label>
+                    <textarea id="share-notes" readonly class="w-full input-field p-3 rounded h-20"></textarea>
+                </div>
+            </div>
+
+            <button onclick="window.location.href = window.location.pathname" class="mt-8 text-sm hover:underline opacity-75">Return to Vault Login</button>
+        </div>
+    </div>
+
+    <!-- AUTH SCREEN -->
+    <div id="auth-screen" class="z-10 flex-1 flex flex-col items-center justify-center p-4">
+        <div class="absolute top-4 right-4">
+             <button onclick="toggleTheme()" class="p-2 rounded-full glass hover:bg-gray-700/20 transition" title="Toggle Theme">
+                <i data-lucide="sun-moon" class="w-5 h-5"></i>
+            </button>
+        </div>
+
+        <div class="w-full max-w-md glass p-8 rounded-xl relative overflow-hidden">
+            <div class="scan-line hidden" id="auth-loader"></div>
+            
+            <div class="text-center mb-8">
+                <div class="inline-block p-3 rounded-full border mb-4" style="border-color: var(--accent);">
+                    <i data-lucide="lock" class="w-8 h-8" style="color: var(--accent);"></i>
+                </div>
+                <h1 class="text-2xl font-bold tracking-tighter">SECURE<span style="color: var(--accent);">VAULT</span></h1>
+                <p class="text-xs mt-2 uppercase tracking-widest opacity-70">Zero-Knowledge Architecture</p>
+                <p id="status-text" class="text-[10px] mt-2 h-4 opacity-70"></p>
+            </div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="space-y-4">
+                <div class="space-y-1">
+                    <label class="text-xs font-bold uppercase opacity-70">Identity</label>
+                    <div class="input-field rounded flex items-center px-3">
+                        <i data-lucide="user" class="w-4 h-4 opacity-50"></i>
+                        <input type="text" id="login-user" class="bg-transparent border-none w-full p-3 focus:outline-none text-inherit" placeholder="Username" autocomplete="off">
+                    </div>
+                </div>
+                <div class="space-y-1">
+                    <label class="text-xs font-bold uppercase opacity-70">Master Key</label>
+                    <div class="input-field rounded flex items-center px-3">
+                        <i data-lucide="key" class="w-4 h-4 opacity-50"></i>
+                        <input type="password" id="login-pass" class="bg-transparent border-none w-full p-3 focus:outline-none text-inherit" placeholder="••••••••••••" autocomplete="off">
+                    </div>
+                </div>
+                <button type="submit" id="login-btn" class="w-full btn-primary py-3 rounded transition mt-4 shadow-lg">
+                    DECRYPT VAULT
+                </button>
+            </form>
+
+            <div class="mt-6 text-center border-t pt-4" style="border-color: var(--border-color);">
+                <p class="text-xs mb-2 opacity-70">New User?</p>
+                <button onclick="toggleRegister()" class="text-sm hover:underline" style="color: var(--accent);">Initialize New Vault</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- REGISTER MODAL -->
+    <div id="register-modal" class="fixed inset-0 z-50 bg-black/80 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-md glass p-8 rounded-xl">
+            <h2 class="text-xl font-bold mb-6">Initialize Vault</h2>
+            <form id="reg-form" class="space-y-4">
+                <input type="text" id="reg-user" class="w-full input-field p-3 rounded" placeholder="Choose Username" required>
+                
+                <div>
+                    <input type="password" id="reg-pass" class="w-full input-field p-3 rounded" placeholder="Set Master Password" required>
+                    <div id="reg-pass-warning" class="hidden mt-2 text-xs p-2 rounded bg-orange-500/10 border border-orange-500/30 text-orange-500"></div>
+                </div>
+
+                <div class="text-xs p-2 rounded opacity-80 bg-red-500/10 border border-red-500/20 text-red-500">
+                    Warning: If you lose your Master Password, your data is lost forever.
+                </div>
+                <div class="flex gap-3">
+                    <button type="button" onclick="toggleRegister()" class="flex-1 py-2 rounded border" style="border-color: var(--border-color);">Cancel</button>
+                    <button type="submit" class="flex-1 btn-primary py-2 rounded">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- HEALTH CHECK MODAL -->
+    <div id="health-modal" class="fixed inset-0 z-50 bg-black/80 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-md glass p-6 rounded-xl relative">
+            <button onclick="closeModal('health-modal')" class="absolute top-4 right-4 opacity-50 hover:opacity-100"><i data-lucide="x"></i></button>
+            <div class="text-center mb-6">
+                <h2 class="text-xl font-bold">Vault Health Scan</h2>
+                <p class="text-xs opacity-70">Security Analysis</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div class="flex justify-between items-center p-3 rounded border" style="border-color: var(--border-color);">
+                    <span class="text-sm opacity-70">Total Entries</span>
+                    <span id="h-total" class="font-bold text-lg">0</span>
+                </div>
+                <div class="flex justify-between items-center p-3 rounded border" style="border-color: var(--border-color);">
+                    <span class="text-sm text-red-400">Weak Passwords</span>
+                    <span id="h-weak" class="font-bold text-red-500 text-lg">0</span>
+                </div>
+                <div class="flex justify-between items-center p-3 rounded border" style="border-color: var(--border-color);">
+                    <span class="text-sm text-yellow-400">Reused Passwords</span>
+                    <span id="h-reuse" class="font-bold text-yellow-500 text-lg">0</span>
+                </div>
+                
+                <div class="mt-6 pt-4 border-t" style="border-color: var(--border-color);">
+                    <div class="flex justify-between mb-1">
+                        <span class="text-xs font-bold uppercase opacity-70">Security Score</span>
+                        <span id="h-score-text" class="text-xs font-bold" style="color: var(--accent);">100%</span>
+                    </div>
+                    <div class="h-2 w-full rounded overflow-hidden" style="background: var(--border-color);">
+                        <div id="h-score-bar" class="h-full transition-all duration-500" style="background: var(--accent);"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" class="z-10 hidden flex-1 flex flex-col h-screen">
+        <!-- Top Bar -->
+        <header class="glass p-4 flex justify-between items-center border-b" style="border-color: var(--border-color);">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded flex items-center justify-center border" style="background-color: var(--bg-input); border-color: var(--border-color);">
+                    <i data-lucide="shield" class="w-4 h-4" style="color: var(--accent);"></i>
+                </div>
+                <div>
+                    <h2 class="font-bold text-sm" id="dash-username">User</h2>
+                    <div class="text-[10px] flex items-center gap-1 opacity-70">
+                        <div class="w-2 h-2 rounded-full animate-pulse" style="background-color: var(--accent);"></div>
+                        ENCRYPTED • AUTO-LOCK ON
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="toggleTheme()" class="p-2 rounded glass hover:opacity-80 transition" title="Switch Theme">
+                    <i data-lucide="sun-moon" class="w-4 h-4"></i>
+                </button>
+                <button onclick="openAddModal()" class="btn-primary px-4 py-2 rounded text-sm font-bold flex items-center gap-2 shadow-lg">
+                    <i data-lucide="plus" class="w-4 h-4"></i> New
+                </button>
+                <button onclick="logout()" class="glass px-3 py-2 rounded transition hover:bg-red-500/20 hover:text-red-500" title="Logout">
+                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-hidden flex flex-col md:flex-row">
+            <!-- Sidebar / Search -->
+            <aside class="w-full md:w-64 glass border-r p-4 flex flex-col gap-4 overflow-y-auto" style="border-color: var(--border-color);">
+                <div class="relative">
+                    <i data-lucide="search" class="absolute left-3 top-3 w-4 h-4 opacity-50"></i>
+                    <input type="text" id="search-box" onkeyup="renderVault()" placeholder="Search..." class="w-full input-field rounded pl-10 pr-4 py-2 text-sm">
+                </div>
+                
+                <!-- Categories -->
+                <div class="flex-1 space-y-6">
+                    <div>
+                        <h3 class="text-xs font-bold uppercase mb-3 px-2 opacity-50">Categories</h3>
+                        <nav class="space-y-1">
+                            <button onclick="filterCategory('All')" class="cat-btn w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2" style="color: var(--accent); font-weight: bold;">
+                                <i data-lucide="layers" class="w-4 h-4"></i> All Items
+                            </button>
+                            <button onclick="filterCategory('Social')" class="cat-btn w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                                <i data-lucide="message-circle" class="w-4 h-4"></i> Social
+                            </button>
+                            <button onclick="filterCategory('Work')" class="cat-btn w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                                <i data-lucide="briefcase" class="w-4 h-4"></i> Work
+                            </button>
+                            <button onclick="filterCategory('Finance')" class="cat-btn w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                                <i data-lucide="credit-card" class="w-4 h-4"></i> Finance
+                            </button>
+                            <button onclick="filterCategory('Other')" class="cat-btn w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                                <i data-lucide="box" class="w-4 h-4"></i> Other
+                            </button>
+                        </nav>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xs font-bold uppercase mb-3 px-2 opacity-50">Tools</h3>
+                        <button onclick="openGenerator()" class="w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                            <i data-lucide="wand-2" class="w-4 h-4"></i> Generator
+                        </button>
+                        <button onclick="runHealthCheck()" class="w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                            <i data-lucide="heart-pulse" class="w-4 h-4"></i> Health Scan
+                        </button>
+                        <button onclick="exportVault()" class="w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                            <i data-lucide="download" class="w-4 h-4"></i> Backup
+                        </button>
+                        <button onclick="triggerImport()" class="w-full text-left p-2 rounded hover:bg-gray-700/10 text-sm flex items-center gap-2 opacity-70">
+                            <i data-lucide="file-up" class="w-4 h-4"></i> Import
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Vault Grid -->
+            <main class="flex-1 overflow-y-auto p-6 relative" style="background-color: rgba(0,0,0,0.02);">
+                <div id="vault-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- Items injected here -->
+                </div>
+                <div id="empty-state" class="hidden absolute inset-0 flex flex-col items-center justify-center opacity-30">
+                    <i data-lucide="safe" class="w-16 h-16 mb-4"></i>
+                    <p>Vault is empty.</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- ENTRY MODAL (Add/Edit) -->
+    <div id="entry-modal" class="fixed inset-0 z-50 bg-black/80 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-lg glass p-6 rounded-xl shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold">Entry Details</h3>
+                <button onclick="closeModal('entry-modal')" class="opacity-50 hover:opacity-100"><i data-lucide="x"></i></button>
+            </div>
+            
+            <form id="entry-form" class="space-y-4">
+                <input type="hidden" id="entry-id">
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-xs font-bold uppercase opacity-50">Category</label>
+                        <select id="e-category" class="w-full input-field p-2 rounded mt-1 text-sm">
+                            <option value="Other">Other</option>
+                            <option value="Social">Social</option>
+                            <option value="Work">Work</option>
+                            <option value="Finance">Finance</option>
+                            <option value="Shopping">Shopping</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold uppercase opacity-50">Service</label>
+                        <input type="text" id="e-site" class="w-full input-field p-2 rounded mt-1 text-sm" placeholder="e.g. Netflix" required>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Username</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="e-user" class="flex-1 input-field p-2 rounded" placeholder="user@email.com">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Password</label>
+                    <div class="flex gap-2 items-center">
+                        <input type="password" id="e-pass" class="flex-1 input-field p-2 rounded font-mono" required>
+                        
+                        <!-- Visibility Toggle -->
+                        <button type="button" onclick="togglePassVisibility('e-pass')" class="opacity-50 hover:opacity-100 p-2" title="Show/Hide">
+                            <i data-lucide="eye" class="w-4 h-4"></i>
+                        </button>
+                        
+                        <!-- GENERATE BUTTON -->
+                        <button type="button" onclick="openGenerator('e-pass')" class="opacity-50 hover:opacity-100 p-2" title="Generate Strong Password" style="color: var(--accent);">
+                            <i data-lucide="wand-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <div class="h-1 w-full bg-gray-700 mt-2 rounded overflow-hidden">
+                        <div id="strength-bar" class="h-full w-0 transition-all duration-300 bg-red-500"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold uppercase opacity-50">Notes</label>
+                    <textarea id="e-notes" class="w-full input-field p-2 rounded text-sm mt-1 h-20"></textarea>
+                </div>
+
+                <div class="pt-4 flex gap-3">
+                    <button type="button" id="delete-btn" onclick="deleteEntry()" class="hidden px-4 py-2 text-red-500 hover:bg-red-500/10 rounded text-sm border border-red-500/20">Delete</button>
+                    <div class="flex-1"></div>
+                    <button type="button" onclick="closeModal('entry-modal')" class="px-4 py-2 opacity-70 hover:opacity-100 text-sm">Cancel</button>
+                    <button type="submit" id="save-btn" class="btn-primary px-6 py-2 rounded">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- LOGIC -->
+    <script>
+        // ================= STATE & CONFIG =================
+        let currentUser = null;
+        let masterKey = null;
+        let vault = [];
+        let dbUsers = [];
+        let currentCategory = 'All';
+        let idleTimer;
+        let currentTheme = 'ghost';
+        let genTargetInputId = null; // Tracks where to send generated password
+        
+        const COL_USER = 'username';
+        const COL_HASH = 'auth_hash';
+        const COL_DATA = 'vault_data';
+
+        // ================= HELPERS =================
+        function initIcons() { if (typeof lucide !== 'undefined') lucide.createIcons(); }
+        const hashPass = (p) => CryptoJS.SHA256(p).toString();
+        const encrypt = (txt, key) => CryptoJS.AES.encrypt(txt, key).toString();
+        const decrypt = (ciph, key) => {
+            try {
+                const bytes = CryptoJS.AES.decrypt(ciph, key);
+                return bytes.toString(CryptoJS.enc.Utf8);
+            } catch(e) { return null; }
+        };
+
+        // ================= THEME ENGINE =================
+        function toggleTheme() {
+            currentTheme = currentTheme === 'ghost' ? 'simple' : 'ghost';
+            document.documentElement.setAttribute('data-theme', currentTheme);
+            initIcons();
+        }
+
+        // ================= ROUTING =================
+        window.onload = () => {
+            const params = new URLSearchParams(window.location.search);
+            const shareData = params.get('share');
+            if (shareData) {
+                try {
+                    const key = params.get('key');
+                    if(key) {
+                        const decryptedString = decrypt(shareData, key);
+                        if(decryptedString) {
+                            const data = JSON.parse(decryptedString);
+                            showSharedItem(data);
+                            return;
+                        }
+                    }
+                } catch(e) { console.error(e); }
+            }
+            loadUsers();
+            // Restore Matrix Background
+            if(typeof drawMatrix === 'function') setInterval(drawMatrix, 50);
+        };
+
+        function showSharedItem(data) {
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('share-receiver').classList.remove('hidden');
+            document.getElementById('share-site').value = data.site;
+            document.getElementById('share-user').value = data.user;
+            document.getElementById('share-pass').value = data.pass;
+            if(data.notes) {
+                document.getElementById('share-notes-container').classList.remove('hidden');
+                document.getElementById('share-notes').value = data.notes;
+            }
+            initIcons();
+        }
+
+        // ================= GENERATOR LOGIC (UPDATED) =================
+        function openGenerator(targetId = null) {
+            genTargetInputId = targetId;
+            const modal = document.getElementById('generator-modal');
+            const useBtn = document.getElementById('use-gen-btn');
+            
+            // If opened from a specific input, show "Use Password" button
+            if(targetId) {
+                useBtn.classList.remove('hidden');
+            } else {
+                useBtn.classList.add('hidden');
+            }
+
+            modal.classList.remove('hidden');
+            runGenerator(); // Generate first pass immediately
+            initIcons();
+        }
+
+        function runGenerator() {
+             const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+             let ret = "";
+             for (let i=0; i<20; i++) ret += chars.charAt(Math.floor(Math.random() * chars.length));
+             
+             document.getElementById('gen-display').innerText = ret;
+        }
+
+        function copyGenPass() {
+            const pass = document.getElementById('gen-display').innerText;
+            copyToClip(pass);
+        }
+
+        function useGeneratedPass() {
+            const pass = document.getElementById('gen-display').innerText;
+            if(genTargetInputId) {
+                const input = document.getElementById(genTargetInputId);
+                input.value = pass;
+                // Trigger input event manually so strength meters update
+                input.dispatchEvent(new Event('input'));
+                showToast("Password Applied!");
+            }
+            closeModal('generator-modal');
+        }
+
+        // ================= AUTH FLOW =================
+        async function loadUsers() {
+            try {
+                const gvizUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json`;
+                const res = await fetch(gvizUrl);
+                const text = await res.text();
+                const json = JSON.parse(text.substring(47).slice(0, -2));
+                dbUsers = json.table.rows.map(row => ({
+                    [COL_USER]: row.c[0]?.v || '',
+                    [COL_HASH]: row.c[1]?.v || '',
+                    [COL_DATA]: row.c[2]?.v || ''
+                }));
+            } catch (e) { console.warn("Cache load failed"); }
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('login-user').value.trim();
+            const p = document.getElementById('login-pass').value.trim();
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true; btn.innerText = "Verifying...";
+            await loadUsers();
+            let userRow = dbUsers.find(row => row[COL_USER] === u);
+            if (!userRow) {
+                try {
+                    const res = await fetch(`${API_URL}/search?${COL_USER}=${encodeURIComponent(u)}`);
+                    const data = await res.json();
+                    if (data.length > 0) userRow = data[0];
+                } catch (err) {}
+            }
+            if (userRow && userRow[COL_HASH] === hashPass(p)) {
+                const raw = decrypt(userRow[COL_DATA], p);
+                if (raw) {
+                    currentUser = u; masterKey = p; vault = JSON.parse(raw);
+                    resetIdleTimer(); renderDashboard();
+                } else {
+                    showToast("Decryption Failed", "error");
+                    btn.disabled = false; btn.innerText = "DECRYPT VAULT";
+                }
+            } else {
+                showToast("Invalid Credentials", "error");
+                btn.disabled = false; btn.innerText = "DECRYPT VAULT";
+            }
+        });
+
+        document.getElementById('reg-pass').addEventListener('input', (e) => {
+            const val = e.target.value;
+            const warn = document.getElementById('reg-pass-warning');
+            let warnings = [];
+            if(val.length < 8) warnings.push("Too short (min 8 chars)");
+            if(!/[0-9]/.test(val)) warnings.push("Add a number");
+            if(!/[A-Z]/.test(val)) warnings.push("Add uppercase");
+            if(warnings.length > 0) {
+                warn.innerText = "Weak Password: " + warnings.join(", ");
+                warn.classList.remove('hidden');
+            } else {
+                warn.classList.add('hidden');
+            }
+        });
+
+        document.getElementById('reg-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const u = document.getElementById('reg-user').value.trim();
+            const p = document.getElementById('reg-pass').value.trim();
+            if (dbUsers.find(row => row[COL_USER] === u)) {
+                showToast("Username taken", "error"); return;
+            }
+            const initialVault = [{ id: Date.now(), site: 'GhostVault', user: u, pass: 'Welcome!', category: 'Other', notes: 'First entry.' }];
+            const encryptedData = encrypt(JSON.stringify(initialVault), p);
+            const payload = {
+                [COL_USER]: u, [COL_HASH]: hashPass(p), [COL_DATA]: encryptedData, 'last_updated': new Date().toISOString()
+            };
+            try {
+                await fetch(API_URL, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: payload })
+                });
+                showToast("Account Created!"); dbUsers.push(payload); toggleRegister();
+            } catch (err) { showToast("Error Creating Account", "error"); }
+        });
+
+        // ================= DASHBOARD =================
+        function renderDashboard() {
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('dash-username').innerText = currentUser;
+            initIcons(); renderVault();
+        }
+
+        function renderVault() {
+            const grid = document.getElementById('vault-grid');
+            const search = document.getElementById('search-box').value.toLowerCase();
+            grid.innerHTML = '';
+            const filtered = vault.filter(item => {
+                const matchesSearch = item.site.toLowerCase().includes(search) || item.user.toLowerCase().includes(search);
+                const matchesCat = currentCategory === 'All' || (item.category || 'Other') === currentCategory;
+                return matchesSearch && matchesCat;
+            });
+            if (filtered.length === 0) document.getElementById('empty-state').classList.remove('hidden');
+            else document.getElementById('empty-state').classList.add('hidden');
+
+            filtered.forEach(item => {
+                const isVisible = item._visible || false;
+                const displayPass = isVisible ? item.pass : '•'.repeat(12);
+                const eyeIcon = isVisible ? 'eye-off' : 'eye';
+                const card = document.createElement('div');
+                card.className = "glass p-4 rounded-xl transition group relative flex flex-col";
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex items-center gap-2">
+                             <div class="p-2 rounded-full bg-gray-500/10">
+                                <i data-lucide="globe" class="w-4 h-4 opacity-70"></i>
+                             </div>
+                             <div>
+                                <h4 class="font-bold text-lg leading-none">${item.site}</h4>
+                                <span class="text-[10px] font-bold uppercase opacity-50">${item.category || 'Other'}</span>
+                             </div>
+                        </div>
+                        <div class="flex gap-1">
+                             <button onclick="generateShareLink(${item.id})" class="p-1.5 hover:bg-gray-500/20 rounded transition" title="Share Secure Link">
+                                <i data-lucide="share-2" class="w-4 h-4 opacity-60"></i>
+                            </button>
+                            <button onclick="editEntry(${item.id})" class="p-1.5 hover:bg-gray-500/20 rounded transition" title="Edit">
+                                <i data-lucide="edit-2" class="w-4 h-4 opacity-60"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="space-y-2 mb-2">
+                        <div class="p-2 rounded bg-gray-500/5 border border-gray-500/10 flex justify-between items-center">
+                            <div class="text-xs opacity-70 truncate mr-2">${item.user}</div>
+                            <button onclick="copyToClip('${item.user}')" class="opacity-50 hover:opacity-100"><i data-lucide="copy" class="w-3 h-3"></i></button>
+                        </div>
+                        <div class="p-2 rounded bg-gray-500/5 border border-gray-500/10 flex justify-between items-center">
+                            <div class="text-xs font-mono truncate mr-2 ${isVisible ? 'text-blue-400' : 'opacity-70'}">${displayPass}</div>
+                            <div class="flex gap-2">
+                                <button onclick="toggleItemVisibility(${item.id})" class="opacity-50 hover:opacity-100"><i data-lucide="${eyeIcon}" class="w-3 h-3"></i></button>
+                                <button onclick="copyToClip('${item.pass}')" class="opacity-50 hover:opacity-100"><i data-lucide="copy" class="w-3 h-3"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+            initIcons();
+        }
+
+        function toggleItemVisibility(id) {
+            const item = vault.find(i => i.id === id);
+            if(item) { item._visible = !item._visible; renderVault(); }
+        }
+
+        function generateShareLink(id) {
+            const item = vault.find(i => i.id === id);
+            if(!item) return;
+            const shareKey = Math.random().toString(36).substring(2, 15);
+            const sharePayload = JSON.stringify({ site: item.site, user: item.user, pass: item.pass, notes: item.notes });
+            const encryptedShare = encrypt(sharePayload, shareKey);
+            const baseUrl = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}?share=${encodeURIComponent(encryptedShare)}&key=${shareKey}`;
+            copyToClip(shareUrl);
+            showToast("Secure Link Copied! Send it to anyone.");
+        }
+
+        // ================= TOOLS =================
+        function runHealthCheck() {
+            const total = vault.length;
+            let weak = 0; let reused = 0; const passMap = {};
+            vault.forEach(item => {
+                if(item.pass.length < 8) weak++;
+                if(passMap[item.pass]) reused++; else passMap[item.pass] = true;
+            });
+            let score = 100; score -= (weak * 10); score -= (reused * 15);
+            if(score < 0) score = 0;
+            document.getElementById('h-total').innerText = total;
+            document.getElementById('h-weak').innerText = weak;
+            document.getElementById('h-reuse').innerText = reused;
+            document.getElementById('h-score-text').innerText = score + "%";
+            const bar = document.getElementById('h-score-bar');
+            bar.style.width = score + "%";
+            bar.style.backgroundColor = score > 70 ? 'var(--accent)' : (score > 40 ? '#eab308' : '#ef4444');
+            document.getElementById('health-modal').classList.remove('hidden');
+        }
+
+        function exportVault() {
+             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(vault, null, 2));
+             const dl = document.createElement('a');
+             dl.setAttribute("href", dataStr); dl.setAttribute("download", "secure_vault_backup.json");
+             document.body.appendChild(dl); dl.click(); dl.remove();
+        }
+        function triggerImport() { document.getElementById('import-file').click(); }
+        function handleImport(input) {
+            const file = input.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    if(Array.isArray(importedData)) {
+                        const newEntries = importedData.map(item => ({ ...item, id: Date.now() + Math.random() }));
+                        vault = [...vault, ...newEntries]; await syncVault(); renderVault();
+                        showToast(`Imported ${newEntries.length} items`);
+                    } else showToast("Invalid file format", "error");
+                } catch (err) { showToast("Failed to parse file", "error"); }
+                input.value = '';
+            };
+            reader.readAsText(file);
+        }
+        function copyToClip(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => showToast("Copied to Clipboard")).catch(() => fallbackCopy(text));
+            } else fallbackCopy(text);
+        }
+        function fallbackCopy(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text; textArea.style.position = "fixed"; textArea.style.left = "-9999px";
+            document.body.appendChild(textArea); textArea.focus(); textArea.select();
+            try { if(document.execCommand('copy')) showToast("Copied to Clipboard"); else showToast("Copy failed", "error"); } 
+            catch (err) { showToast("Copy failed", "error"); }
+            document.body.removeChild(textArea);
+        }
+        function copyInput(id) { copyToClip(document.getElementById(id).value); }
+        function filterCategory(cat) {
+            currentCategory = cat;
+            document.querySelectorAll('.cat-btn').forEach(btn => {
+                btn.style.opacity = btn.innerText.includes(cat) ? '1' : '0.7';
+                btn.style.fontWeight = btn.innerText.includes(cat) ? 'bold' : 'normal';
+                btn.style.color = btn.innerText.includes(cat) ? 'var(--accent)' : 'inherit';
+            });
+            renderVault();
+        }
+        function logout() {
+            currentUser = null; masterKey = null; vault = [];
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('auth-screen').classList.remove('hidden');
+            document.getElementById('login-form').reset();
+        }
+        function showToast(msg, type='success') {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            t.classList.remove('translate-x-full');
+            setTimeout(() => t.classList.add('translate-x-full'), 3000);
+        }
+        function toggleRegister() { document.getElementById('register-modal').classList.toggle('hidden'); }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+        function openAddModal() {
+            document.getElementById('entry-form').reset();
+            document.getElementById('entry-id').value = '';
+            document.getElementById('delete-btn').classList.add('hidden');
+            document.getElementById('entry-modal').classList.remove('hidden');
+            // Reset strength bar
+             document.getElementById('strength-bar').style.width = '0';
+        }
+        
+        // ================= CRUD =================
+        function editEntry(id) {
+            const item = vault.find(i => i.id === id);
+            document.getElementById('e-site').value = item.site;
+            document.getElementById('e-user').value = item.user;
+            document.getElementById('e-pass').value = item.pass;
+            document.getElementById('e-category').value = item.category || 'Other';
+            document.getElementById('e-notes').value = item.notes || '';
+            document.getElementById('entry-id').value = item.id;
+            document.getElementById('delete-btn').classList.remove('hidden');
+            document.getElementById('entry-modal').classList.remove('hidden');
+        }
+        document.getElementById('entry-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const idVal = document.getElementById('entry-id').value;
+            const newEntry = {
+                id: idVal ? parseInt(idVal) : Date.now(),
+                site: document.getElementById('e-site').value,
+                user: document.getElementById('e-user').value,
+                pass: document.getElementById('e-pass').value,
+                category: document.getElementById('e-category').value,
+                notes: document.getElementById('e-notes').value,
+                _visible: false
+            };
+            if (idVal) vault[vault.findIndex(i => i.id == idVal)] = newEntry;
+            else vault.push(newEntry);
+            await syncVault(); closeModal('entry-modal'); renderVault();
+        });
+        async function deleteEntry() {
+            const id = document.getElementById('entry-id').value;
+            if(!id || !confirm("Delete this entry?")) return;
+            vault = vault.filter(i => i.id != id);
+            await syncVault(); closeModal('entry-modal'); renderVault();
+        }
+        async function syncVault() {
+            const btn = document.getElementById('save-btn');
+            const prev = btn.innerText; btn.innerText = "Syncing..."; btn.disabled = true;
+            const cleanVault = vault.map(({_visible, ...keep}) => keep);
+            try {
+                const url = `${API_URL}/${COL_USER}/${currentUser}`;
+                await fetch(url, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        data: { [COL_DATA]: encrypt(JSON.stringify(cleanVault), masterKey), 'last_updated': new Date().toISOString() } 
+                    })
+                });
+                showToast("Vault Saved");
+            } catch(e) { showToast("Sync Failed", "error"); }
+            btn.innerText = prev; btn.disabled = false;
+        }
+        function togglePassVisibility(id) {
+            const x = document.getElementById(id);
+            x.type = x.type === "password" ? "text" : "password";
+        }
+        function resetIdleTimer() {
+            clearTimeout(idleTimer);
+            if(currentUser) idleTimer = setTimeout(logout, AUTO_LOCK_MINUTES * 60000);
+        }
+
+        // Matrix Effect
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const bg = document.getElementById('matrix-bg');
+        if(bg) {
+            bg.appendChild(canvas);
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            const letters = "0101010101ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const fontSize = 14;
+            const columns = canvas.width / fontSize;
+            const drops = Array(Math.ceil(columns)).fill(1);
+            window.drawMatrix = function() {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#0F0";
+                ctx.font = fontSize + "px arial";
+                for (let i = 0; i < drops.length; i++) {
+                    const text = letters[Math.floor(Math.random() * letters.length)];
+                    ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+                    if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+                    drops[i]++;
+                }
+            };
+            window.addEventListener('resize', () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            });
+        }
+
+        // Init
+        initIcons();
+        
+        // Event Listeners for Auto-Lock
+        document.body.addEventListener('mousemove', resetIdleTimer);
+        document.body.addEventListener('keypress', resetIdleTimer);
+    </script>
+</body>
+</html>
